@@ -2,7 +2,7 @@
 
 ## Docker Compose quickstart
 
-Install Docker with Compose. From the repository root, create the environment file:
+Install Docker with Compose and run `docker login dhi.io` to pull the Docker Hardened Images. From the repository root, create the environment file:
 
 ```sh
 umask 077
@@ -20,6 +20,21 @@ docker compose logs --tail=100 whatsapp-mcp whatsapp-worker
 ```
 
 The gateway publishes port `8080`. The worker listens on port `8081` inside the Compose network. Only the worker mounts the `whatsapp-data` volume, which contains SQLite at `/data/whatsapp-mcp.db`. Media staging uses the worker's temporary filesystem.
+
+The gateway and worker run as UID/GID `65532`. For an existing root-owned Compose SQLite volume, stop the services and build the new images before changing ownership. Run these commands from the same Compose project so the worker reuses its existing volume:
+
+```sh
+docker compose stop
+docker compose build
+docker compose run --rm --no-deps --user 0:0 --entrypoint /bin/sh whatsapp-worker -ec '
+  chown 65532:65532 /data
+  for name in whatsapp-mcp.db whatsapp-mcp.db-wal whatsapp-mcp.db-shm whatsapp-mcp.db-journal; do
+    file="/data/$name"
+    if [ -e "$file" ]; then chown 65532:65532 "$file"; fi
+  done
+'
+docker compose up -d
+```
 
 ## Native build and deployment
 
@@ -41,7 +56,7 @@ Set the same `WORKER_BEARER_TOKEN` in both terminals and set `MCP_BEARER_TOKEN` 
 HTTP_ADDR=127.0.0.1:8080 ./whatsapp-mcp
 ```
 
-Install FFmpeg on the worker host if you need to convert audio to WhatsApp voice messages. The Compose image includes it. Release archives contain the same binary for both roles.
+Install FFmpeg on the worker host if you need to convert audio to WhatsApp voice messages. The Compose worker image includes it. Release archives contain the same binary for both roles.
 
 ### Linux systemd user services
 
