@@ -1,0 +1,19 @@
+[Unit]
+Description=WhatsApp linked device worker
+After=network-online.target
+ConditionUser=!root
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/sysconfig/whatsapp-mcp
+EnvironmentFile=-%h/.config/whatsapp-mcp/env
+Environment=TMPDIR=%t/whatsapp-worker
+RuntimeDirectory=whatsapp-worker
+RuntimeDirectoryMode=0700
+StateDirectory=whatsapp-mcp
+StateDirectoryMode=0700
+WorkingDirectory=%S/whatsapp-mcp
+ExecStart=/usr/bin/whatsapp-mcp --worker
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true

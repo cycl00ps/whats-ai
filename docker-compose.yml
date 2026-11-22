@@ -1,0 +1,33 @@
+services:
+  whatsapp-worker:
+    build: .
+    command: ["--worker"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:/data/whatsapp-mcp.db
+      WORKER_ADDR: ":8081"
+      WORKER_BEARER_TOKEN: ${WORKER_BEARER_TOKEN:?set WORKER_BEARER_TOKEN}
+      TMPDIR: /run/whatsapp-media
+    tmpfs:
+      - /run/whatsapp-media:size=192m,mode=0700
+    volumes:
+      - whatsapp-data:/data
+
+  whatsapp-mcp:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - whatsapp-worker
+    environment:
+      WORKER_URL: http://whatsapp-worker:8081
+      WORKER_BEARER_TOKEN: ${WORKER_BEARER_TOKEN:?set WORKER_BEARER_TOKEN}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:?set MCP_BEARER_TOKEN}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      HTTP_ADDR: ":8080"
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+      NGROK_DOMAIN: ${NGROK_DOMAIN:-}
+    ports:
+      - "8080:8080"
+
+volumes:
+  whatsapp-data:
