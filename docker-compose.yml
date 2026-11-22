@@ -1,6 +1,8 @@
 services:
   whatsapp-worker:
-    build: .
+    build:
+      context: .
+      target: worker
     command: ["--worker"]
     restart: unless-stopped
     environment:
@@ -9,12 +11,14 @@ services:
       WORKER_BEARER_TOKEN: ${WORKER_BEARER_TOKEN:?set WORKER_BEARER_TOKEN}
       TMPDIR: /run/whatsapp-media
     tmpfs:
-      - /run/whatsapp-media:size=192m,mode=0700
+      - /run/whatsapp-media:size=192m,mode=0700,uid=65532,gid=65532
     volumes:
       - whatsapp-data:/data
 
   whatsapp-mcp:
-    build: .
+    build:
+      context: .
+      target: gateway
     restart: unless-stopped
     depends_on:
       - whatsapp-worker
