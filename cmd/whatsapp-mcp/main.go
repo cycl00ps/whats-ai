@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -11,15 +10,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
-	dotvault "github.com/goodtune/dotvault/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"golang.ngrok.com/ngrok"
-	ngrokconfig "golang.ngrok.com/ngrok/config"
 
 	"github.com/goodtune/whatsapp-mcp/internal/auth"
 	"github.com/goodtune/whatsapp-mcp/internal/config"
@@ -38,25 +32,7 @@ func main() {
 }
 
 func run() error {
-	// A private FlagSet, not the flag.CommandLine default: the dotvault
-	// client pulls in Google's TPM/confidential-computing attestation
-	// libraries several layers down, and those register their own global
-	// flags (-sev_guest_device_path and the like) on flag.CommandLine via
-	// init(). Keeping our own flag(s) on a separate FlagSet means our
-	// --help stays limited to flags we actually support, and avoids
-	// colliding with whatever that dependency graph registers.
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	ngrokDotvault := fs.String("ngrok-dotvault", "",
-		"Read the ngrok authtoken from dotvault instead of NGROK_AUTHTOKEN, given as "+
-			"\"<secret>/<field>\" (e.g. \"whatsapp-mcp/ngrok/authtoken\" for the authtoken field "+
-			"of kv/users/<you>/whatsapp-mcp/ngrok — there is no default secret, so the full path "+
-			"is always required). Requires a cached dotvault login (run \"dotvault login\" first); "+
-			"overrides NGROK_AUTHTOKEN when both are set.")
-	dotvaultConfig := fs.String("dotvault-config", "",
-		"Path to dotvault's config file, for a dotvault daemon that was started with its own "+
-			"--config pointing somewhere other than the OS default (e.g. \"~/.config/dotvault/config.yaml\"). "+
-			"Only read when a --*-dotvault* flag is set; defaults to dotvault's standard system path "+
-			"(dotvault.DefaultConfigPath()) when unset.")
 	workerRole := fs.Bool("worker", false, "Run the private WhatsApp worker instead of the MCP gateway.")
 	showVersion := fs.Bool("version", false, "Print the version and exit.")
 	fs.Parse(os.Args[1:])
@@ -82,23 +58,6 @@ func run() error {
 		return err
 	}
 
-	if *ngrokDotvault != "" {
-		vault, err := dotvaultClient(ctx, *dotvaultConfig)
-		if err != nil {
-			return err
-		}
-		if *ngrokDotvault != "" {
-			token, err := readDotvaultRef(ctx, vault, *ngrokDotvault)
-			if err != nil {
-				return fmt.Errorf("--ngrok-dotvault: %w", err)
-			}
-			if cfg.NgrokAuthtoken != "" {
-				log.Printf("--ngrok-dotvault overrides NGROK_AUTHTOKEN")
-			}
-			cfg.NgrokAuthtoken = token
-		}
-	}
-
 	address := os.Getenv("WORKER_URL")
 	if address == "" {
 		address = "http://127.0.0.1:8081"
@@ -107,7 +66,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	listener, publicURL, err := listen(ctx, cfg)
+	listener, publicURL, err := listen(cfg)
 	if err != nil {
 		return err
 	}
@@ -139,141 +98,15 @@ func newHTTPHandler(server *mcp.Server, bearerToken string) http.Handler {
 	return mux
 }
 
-// listen opens the address the HTTP/MCP server will be served on, and
-// returns the public URL it is reachable at: a public ngrok tunnel when
-// NGROK_AUTHTOKEN is configured (so the server can be self-hosted behind
-// NAT or a firewall with no port-forwarding or reverse proxy setup), or a
-// plain local TCP listener otherwise.
-func listen(ctx context.Context, cfg config.Config) (net.Listener, string, error) {
-	if cfg.NgrokAuthtoken == "" {
-		listener, err := net.Listen("tcp", cfg.HTTPAddr)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to listen on %s: %w", cfg.HTTPAddr, err)
-		}
-		log.Printf("whatsapp-mcp listening on %s", cfg.HTTPAddr)
-		publicURL := cfg.PublicURL
-		if publicURL == "" {
-			publicURL = fmt.Sprintf("http://localhost:%d", listener.Addr().(*net.TCPAddr).Port)
-		}
-		return listener, publicURL, nil
-	}
-
-	endpointOpts := []ngrokconfig.HTTPEndpointOption{}
-	if cfg.NgrokDomain != "" {
-		endpointOpts = append(endpointOpts, ngrokconfig.WithDomain(cfg.NgrokDomain))
-	}
-
-	tunnel, err := ngrok.Listen(ctx,
-		ngrokconfig.HTTPEndpoint(endpointOpts...),
-		ngrok.WithAuthtoken(cfg.NgrokAuthtoken),
-	)
+func listen(cfg config.Config) (net.Listener, string, error) {
+	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to start ngrok tunnel: %w", err)
+		return nil, "", fmt.Errorf("failed to listen on %s: %w", cfg.HTTPAddr, err)
 	}
-	log.Printf("whatsapp-mcp listening on public ngrok tunnel: %s", tunnel.URL())
-	return tunnel, strings.TrimSuffix(tunnel.URL(), "/"), nil
-}
-
-// dotvaultClient returns a client for the caller's dotvault store
-// (github.com/goodtune/dotvault), for reading secrets such as the ngrok
-//
-// configPath, if non-empty, overrides dotvault's own config discovery: a
-// dotvault daemon started with its own --config pointing somewhere other
-// than the OS default (as the "run as a per-user agent" setups in the
-// README do, rather than installing a system-wide config) reads its secret
-// paths from that file, not the default one, and this process has no way to
-// discover that override except being told. An empty configPath falls back
-// to dotvault.DefaultConfigPath(), the OS-standard location.
-//
-// This runs inside a long-lived daemon, so it only ever uses
-// AuthenticateCached: dotvault's own client docs are explicit that the
-// interactive Authenticate/Login entry points must not be called from a
-// non-interactive service (they can open a browser or block on a terminal
-// prompt). A missing cached token is therefore an operator error (run
-// `dotvault login` first), not something this process should try to fix by
-// prompting.
-func dotvaultClient(ctx context.Context, configPath string) (*dotvault.Client, error) {
-	if configPath == "" {
-		configPath = dotvault.DefaultConfigPath()
-	} else if expanded, err := expandHome(configPath); err != nil {
-		return nil, fmt.Errorf("--dotvault-config: %w", err)
-	} else {
-		configPath = expanded
+	log.Printf("whatsapp-mcp listening on %s", cfg.HTTPAddr)
+	publicURL := cfg.PublicURL
+	if publicURL == "" {
+		publicURL = fmt.Sprintf("http://localhost:%d", listener.Addr().(*net.TCPAddr).Port)
 	}
-
-	cfg, err := dotvault.LoadConfig(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load dotvault config: %w", err)
-	}
-
-	cli, err := dotvault.New(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create dotvault client: %w", err)
-	}
-
-	if err := cli.AuthenticateCached(ctx); err != nil {
-		switch {
-		case errors.Is(err, dotvault.ErrLoginRequired):
-			return nil, fmt.Errorf("dotvault: no cached login; run `dotvault login` and retry: %w", err)
-		case errors.Is(err, dotvault.ErrUnreachable):
-			return nil, fmt.Errorf("dotvault: vault unreachable: %w", err)
-		default:
-			return nil, fmt.Errorf("dotvault: authentication failed: %w", err)
-		}
-	}
-	return cli, nil
-}
-
-// readDotvault reads one field of one of the caller's dotvault secrets, e.g.
-// service "ngrok", field "authtoken" reads kv/users/<you>/ngrok's
-// "authtoken" field.
-func readDotvault(ctx context.Context, cli *dotvault.Client, service, field string) (string, error) {
-	value, found, err := cli.ReadUserSecret(ctx, service, field)
-	if err != nil {
-		return "", fmt.Errorf("dotvault: failed to read %s/%s: %w", service, field, err)
-	}
-	if !found {
-		return "", fmt.Errorf("dotvault: no \"%s\" field under the \"%s\" secret for your identity; enroll it first", field, service)
-	}
-	return value, nil
-}
-
-// readDotvaultRef reads the dotvault field named by ref, "<secret>/<field>"
-// (e.g. "whatsapp-mcp/ngrok/authtoken"). Everything up to the last slash is
-// the secret path — which can itself contain slashes, as in that example —
-// and the final segment is the field, which never does.
-//
-// Every --*-dotvault* flag takes a ref rather than a field name with a
-// secret name defaulted elsewhere: a default secret (e.g. always "ngrok")
-// is a silent assumption about where operators keep that credential, and
-// it's wrong as soon as a secret holds more than one app's worth of
-// tokens. Spelling out the full path on every flag means a typo'd or
-// unenrolled secret fails loudly, instead of this process quietly reading
-// whatever happens to live at the assumed default.
-func readDotvaultRef(ctx context.Context, cli *dotvault.Client, ref string) (string, error) {
-	i := strings.LastIndex(ref, "/")
-	if i <= 0 || i == len(ref)-1 {
-		return "", fmt.Errorf("%q must be \"<secret>/<field>\", e.g. \"whatsapp-mcp/ngrok/authtoken\"", ref)
-	}
-	return readDotvault(ctx, cli, ref[:i], ref[i+1:])
-}
-
-// expandHome expands a leading "~" or "~/..." in path to the caller's home
-// directory, as a shell would. --dotvault-config is read by this process
-// directly, with no shell in between to do that expansion (e.g. when set
-// from a launchd/systemd unit's literal argument list), so a path copied
-// from a shell prompt with a leading "~" would otherwise be passed to
-// dotvault.LoadConfig verbatim and fail with a confusing "no such file".
-func expandHome(path string) (string, error) {
-	if path != "~" && !strings.HasPrefix(path, "~/") {
-		return path, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve home directory for %q: %w", path, err)
-	}
-	if path == "~" {
-		return home, nil
-	}
-	return filepath.Join(home, path[2:]), nil
+	return listener, publicURL, nil
 }
