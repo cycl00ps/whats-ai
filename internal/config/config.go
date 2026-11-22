@@ -18,27 +18,15 @@ type Config struct {
 	HTTPAddr    string
 	PublicURL   string
 	MediaDir    string
-
-	// NgrokAuthtoken, if set, makes the server listen on a public ngrok
-	// tunnel (via golang.ngrok.com/ngrok) instead of a local TCP address —
-	// useful for self-hosting without port-forwarding or a reverse proxy.
-	// HTTPAddr is ignored when this is set. Get a token at
-	// https://dashboard.ngrok.com/get-started/your-authtoken.
-	NgrokAuthtoken string
-	// NgrokDomain optionally pins the tunnel to a reserved ngrok domain, so
-	// the public URL stays the same across restarts.
-	NgrokDomain string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		DatabaseURL:    getEnvDefault("DATABASE_URL", "sqlite:store/whatsapp-mcp.db"),
-		BearerToken:    os.Getenv("MCP_BEARER_TOKEN"),
-		HTTPAddr:       getEnvDefault("HTTP_ADDR", ":8080"),
-		PublicURL:      strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/"),
-		MediaDir:       getEnvDefault("MEDIA_DIR", "store/media"),
-		NgrokAuthtoken: os.Getenv("NGROK_AUTHTOKEN"),
-		NgrokDomain:    os.Getenv("NGROK_DOMAIN"),
+		DatabaseURL: getEnvDefault("DATABASE_URL", "sqlite:store/whatsapp-mcp.db"),
+		BearerToken: os.Getenv("MCP_BEARER_TOKEN"),
+		HTTPAddr:    getEnvDefault("HTTP_ADDR", ":8080"),
+		PublicURL:   strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/"),
+		MediaDir:    getEnvDefault("MEDIA_DIR", "store/media"),
 	}
 	if !ValidToken(cfg.BearerToken) {
 		return cfg, fmt.Errorf("MCP_BEARER_TOKEN must be a nonempty token without whitespace")

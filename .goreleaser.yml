@@ -46,12 +46,7 @@ nfpms:
     suggests:
       - ffmpeg
     contents:
-      # Like dotvault, this ships as a per-user service: the --*-dotvault
-      # flags read secrets with the user's own cached dotvault login, and
-      # its data lives in that user's state directory. Enable with
-      # `systemctl --user enable --now whatsapp-mcp.service` (plus
-      # `loginctl enable-linger <user>` to keep it running after logout).
-      # /usr/lib/systemd/user/ is the canonical user-unit search path.
+      # Install both services in the systemd user-unit search path.
       - src: packaging/linux/whatsapp-mcp.service
         dst: /usr/lib/systemd/user/whatsapp-mcp.service
         file_info:

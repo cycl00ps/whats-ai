@@ -69,9 +69,7 @@ The gateway unit starts the worker unit. Use `loginctl enable-linger "$USER"` if
 | `DATABASE_URL` | Worker | Defaults to `sqlite:store/whatsapp-mcp.db`. PostgreSQL is also supported. |
 | `TMPDIR` | Worker | Optional staging location for uploads and audio conversion. |
 
-For remote clients, serve the gateway over HTTPS. Set `PUBLIC_URL` when using a reverse proxy. For built-in tunnelling, set `NGROK_AUTHTOKEN` and optionally `NGROK_DOMAIN` on the gateway. Use the tunnel URL printed at startup. Tunnel mode supersedes `HTTP_ADDR` and `PUBLIC_URL`.
-
-For a native gateway using Dotvault, run `dotvault login` first, then add `--ngrok-dotvault whatsapp-mcp/ngrok/authtoken`, substituting your own full secret path and field. Use `--dotvault-config /path/to/config.yaml` for a custom config. Under systemd, put these flags in `WHATSAPP_MCP_ARGS` in the environment file.
+For remote clients, put the gateway behind an HTTPS reverse proxy. Forward MCP and media requests, including their authorization headers, to the gateway. Set `PUBLIC_URL` to the external HTTPS origin.
 
 When upgrading from the single-account standalone service, stop it before starting the worker. Reuse the same Compose project and volume, or point the native worker at the existing SQLite database. Pairing survives and existing standalone history stays in the old tables. For a GitHub-era installation, use a fresh database and link again.
 

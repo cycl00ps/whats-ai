@@ -24,8 +24,6 @@ services:
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:?set MCP_BEARER_TOKEN}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       HTTP_ADDR: ":8080"
-      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
-      NGROK_DOMAIN: ${NGROK_DOMAIN:-}
     ports:
       - "8080:8080"
 
